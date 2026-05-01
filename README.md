@@ -20,6 +20,7 @@
 
 <!-- dashboard image -->
 ![Dashboard Image of Docify](./images/dashboard.png)
+
 ## ⚡ Quick Start
 
 ```bash
