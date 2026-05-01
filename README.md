@@ -7,13 +7,13 @@
 
 <h1 align="center">📄 Docify</h1>
 
-<p align="center">
-  <strong>Zero-config Express.js middleware that automatically generates API documentation from runtime usage.</strong>
+<<p align="center">
+  <strong>Turn any Express API into live documentation in 2 lines.</strong>
 </p>
 
 <p align="center">
-  No Swagger. No OpenAPI. No schemas. No decorators.<br/>
-  Just install it, use Express normally, and documentation appears.
+  No Swagger. No schemas. No setup.<br/>
+  Just run your API → docs generate themselves.
 </p>
 
 ---
