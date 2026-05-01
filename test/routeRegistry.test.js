@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { RouteRegistry } = require('../src/core/routeRegistry');
 
 describe('RouteRegistry', () => {
@@ -132,6 +135,51 @@ describe('RouteRegistry', () => {
       registry.register({ method: 'POST', path: '/b', statusCode: 201 });
       registry.clear();
       expect(registry.getAll()).toHaveLength(0);
+    });
+  });
+
+  describe('delete', () => {
+    it('should delete a single endpoint', () => {
+      registry.register({ method: 'GET', path: '/api/users', statusCode: 200 });
+      registry.register({ method: 'POST', path: '/api/users', statusCode: 201 });
+
+      expect(registry.delete('GET', '/api/users')).toBe(true);
+      expect(registry.getByRoute('GET', '/api/users')).toBeNull();
+      expect(registry.getByRoute('POST', '/api/users')).not.toBeNull();
+    });
+
+    it('should emit delete event when an endpoint is removed', () => {
+      let emitted = false;
+      registry.register({ method: 'GET', path: '/api/users', statusCode: 200 });
+      registry.on('delete', () => { emitted = true; });
+
+      registry.delete('GET', '/api/users');
+
+      expect(emitted).toBe(true);
+    });
+  });
+
+  describe('persistence', () => {
+    it('should load endpoints from the configured storage file', () => {
+      const storagePath = path.join(os.tmpdir(), `docify-${Date.now()}-${Math.random()}.json`);
+      const first = new RouteRegistry({ maxExamples: 3, persist: true, storagePath });
+
+      first.register({
+        method: 'POST',
+        path: '/api/users',
+        statusCode: 201,
+        requestBody: { name: 'Alice' },
+        responseBody: { id: 1 },
+      });
+
+      const second = new RouteRegistry({ maxExamples: 3, persist: true, storagePath });
+      const ep = second.getByRoute('POST', '/api/users');
+
+      expect(ep).not.toBeNull();
+      expect(ep.hitCount).toBe(1);
+      expect(ep.statusCodes).toContain(201);
+
+      fs.rmSync(storagePath, { force: true });
     });
   });
 

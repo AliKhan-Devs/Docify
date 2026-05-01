@@ -22,6 +22,8 @@ const logger = require('./core/logger');
  * @param {string[]} [options.sensitiveFields=[]]      - Additional field names to redact
  * @param {string[]} [options.ignorePaths=[]]          - Paths to exclude from capture
  * @param {boolean}  [options.captureHeaders=false]    - Whether to capture request/response headers
+ * @param {boolean}  [options.persist=true]            - Persist captured docs across restarts
+ * @param {string}   [options.storagePath]             - JSON file used for persisted docs
  * @returns {Function} Express middleware
  */
 function docify(options = {}) {
@@ -33,6 +35,8 @@ function docify(options = {}) {
     sensitiveFields = [],
     ignorePaths = [],
     captureHeaders = false,
+    persist = true,
+    storagePath,
   } = options;
 
   // Check if Docify should be disabled
@@ -49,7 +53,7 @@ function docify(options = {}) {
     additionalFields: sensitiveFields,
   });
 
-  const registry = new RouteRegistry({ maxExamples });
+  const registry = new RouteRegistry({ maxExamples, persist, storagePath });
   const generator = new DocGenerator(registry);
 
   // Create the capture middleware

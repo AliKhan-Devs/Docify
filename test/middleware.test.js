@@ -9,7 +9,7 @@ describe('Capture Middleware (integration)', () => {
   beforeAll(() => {
     app = express();
     app.use(express.json());
-    app.use(docify({ docsPath: '/docs', sanitize: true }));
+    app.use(docify({ docsPath: '/docs', sanitize: true, persist: false }));
 
     app.get('/api/users', (req, res) => {
       res.json({ users: [{ id: 1, name: 'Alice' }] });
@@ -93,6 +93,29 @@ describe('Capture Middleware (integration)', () => {
     const res = await request(app).get('/docs/api.json').expect(200);
     expect(res.body.stats).toBeDefined();
     expect(res.body.stats.totalEndpoints).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should delete a single captured endpoint', async () => {
+    await request(app).get('/api/users').expect(200);
+
+    await request(app)
+      .delete('/docs/endpoint')
+      .send({ method: 'GET', path: '/api/users' })
+      .expect(200);
+
+    const res = await request(app).get('/docs/api.json').expect(200);
+    const ep = res.body.endpoints.find(e => e.method === 'GET' && e.path === '/api/users');
+    expect(ep).toBeUndefined();
+  });
+
+  it('should run an endpoint through the docs try route', async () => {
+    const res = await request(app)
+      .post('/docs/try')
+      .send({ method: 'POST', path: '/api/users', body: { name: 'Try User' } })
+      .expect(201);
+
+    expect(res.body.statusCode).toBe(201);
+    expect(res.body.body.name).toBe('Try User');
   });
 });
 

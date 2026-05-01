@@ -61,6 +61,8 @@ app.use(docify({
   sensitiveFields: [],        // Additional field names to redact (default: [])
   ignorePaths: ['/health'],   // Paths to exclude from capture (default: [])
   captureHeaders: false,      // Whether to capture req/res headers (default: false)
+  persist: true,              // Keep captured docs after server restarts (default: true)
+  storagePath: '.docify/docify.json', // Optional custom persistence file
 }));
 ```
 
@@ -84,6 +86,14 @@ Express Request → Capture Middleware → Sanitizer → Route Registry → Doc 
 | **Sanitizer** | Deep-scans objects and masks sensitive fields (`password`, `token`, `secret`, etc.) |
 | **Doc Generator** | Transforms registry data into structured, sorted, grouped JSON |
 | **UI Server** | Serves a self-contained HTML documentation page with SSE live updates |
+
+## Persistent Docs, Cleanup, and Try It
+
+Docify now stores captured documentation in `.docify/docify.json` by default, so restarting your backend does not wipe the generated docs. Set `persist: false` if you only want in-memory docs during tests or short-lived sessions.
+
+If a wrong request is captured, such as `GET /users` when the endpoint should be `POST /users`, open the endpoint in the UI and use the delete button to remove only that captured route.
+
+Each endpoint page also includes a try panel. You can edit the method, path, query string, and JSON body, then run the request against the live backend and see the real response immediately.
 
 ### Parameterized Route Detection
 
@@ -115,6 +125,8 @@ When Docify is mounted, these routes are available:
 | `GET /docs/api.json` | Raw JSON API catalog (SDK-friendly) |
 | `GET /docs/stream` | Server-Sent Events stream for live updates |
 | `DELETE /docs/api.json` | Clear all captured data |
+| `DELETE /docs/endpoint` | Delete one captured endpoint by `method` and `path` |
+| `POST /docs/try` | Run an endpoint against the live backend from the docs UI |
 
 ## 🧪 Running the Example
 

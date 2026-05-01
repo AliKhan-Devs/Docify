@@ -8,6 +8,8 @@
  */
 
 const logger = require('../core/logger');
+const http = require('http');
+const https = require('https');
 
 /**
  * Mount Docify doc routes onto an Express app.
@@ -45,12 +47,18 @@ function mountDocsRoutes(app, options) {
       res.write(`data: ${JSON.stringify({ type: 'clear' })}\n\n`);
     };
 
+    const onDelete = (data) => {
+      res.write(`data: ${JSON.stringify({ type: 'delete', ...data })}\n\n`);
+    };
+
     registry.on('update', onUpdate);
     registry.on('clear', onClear);
+    registry.on('delete', onDelete);
 
     req.on('close', () => {
       registry.off('update', onUpdate);
       registry.off('clear', onClear);
+      registry.off('delete', onDelete);
     });
   });
 
@@ -60,6 +68,36 @@ function mountDocsRoutes(app, options) {
     res.json({ success: true });
   });
 
+  // --- Delete a single endpoint ---
+  app.delete(`${docsPath}/endpoint`, async (req, res) => {
+    const body = await readJsonBody(req);
+    const method = body && body.method;
+    const path = body && body.path;
+
+    if (!method || !path) {
+      return res.status(400).json({ error: 'method and path are required' });
+    }
+
+    const removed = registry.delete(method, path);
+    if (!removed) {
+      return res.status(404).json({ error: 'endpoint not found' });
+    }
+
+    res.json({ success: true });
+  });
+
+  // --- Try an endpoint from the docs UI ---
+  app.post(`${docsPath}/try`, async (req, res) => {
+    try {
+      const body = await readJsonBody(req);
+      const result = await runRequestFromDocs(req, body || {});
+      res.status(result.statusCode).json(result);
+    } catch (err) {
+      const status = err.statusCode || 500;
+      res.status(status).json({ error: err.message || 'Request failed' });
+    }
+  });
+
   // --- Main Docs UI ---
   app.get(docsPath, (req, res) => {
     res.setHeader('Content-Type', 'text/html');
@@ -67,6 +105,109 @@ function mountDocsRoutes(app, options) {
   });
 
   logger.info(`Docs UI mounted at ${docsPath}`);
+}
+
+function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object') {
+    return Promise.resolve(req.body);
+  }
+
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      if (!raw.trim()) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch (err) {
+        err.statusCode = 400;
+        reject(err);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function runRequestFromDocs(req, payload) {
+  const method = String(payload.method || 'GET').toUpperCase();
+  const targetPath = String(payload.path || '').trim();
+  const headers = payload.headers && typeof payload.headers === 'object' ? payload.headers : {};
+  const body = payload.body;
+
+  if (!targetPath || !targetPath.startsWith('/')) {
+    const err = new Error('path must start with /');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const protocol = req.protocol === 'https' ? 'https:' : 'http:';
+  const baseUrl = `${protocol}//${req.get('host')}`;
+  const url = new URL(targetPath, baseUrl);
+  const bodyAllowed = !['GET', 'HEAD'].includes(method);
+  const requestBody = bodyAllowed && body !== undefined && body !== null && body !== ''
+    ? (typeof body === 'string' ? body : JSON.stringify(body))
+    : null;
+
+  const requestHeaders = { ...headers };
+  delete requestHeaders.host;
+  delete requestHeaders.connection;
+  delete requestHeaders['content-length'];
+
+  if (requestBody && !hasHeader(requestHeaders, 'content-type')) {
+    requestHeaders['content-type'] = 'application/json';
+  }
+  if (requestBody) {
+    requestHeaders['content-length'] = Buffer.byteLength(requestBody);
+  }
+
+  return new Promise((resolve, reject) => {
+    const transport = url.protocol === 'https:' ? https : http;
+    const startedAt = Date.now();
+    const outbound = transport.request(url, {
+      method,
+      headers: requestHeaders,
+    }, upstream => {
+      const chunks = [];
+      upstream.on('data', chunk => chunks.push(chunk));
+      upstream.on('end', () => {
+        const rawBody = Buffer.concat(chunks).toString('utf8');
+        const contentType = upstream.headers['content-type'] || '';
+        resolve({
+          statusCode: upstream.statusCode,
+          statusMessage: upstream.statusMessage,
+          headers: upstream.headers,
+          body: parseResponseBody(rawBody, contentType),
+          durationMs: Date.now() - startedAt,
+        });
+      });
+    });
+
+    outbound.on('error', reject);
+    outbound.setTimeout(30000, () => {
+      outbound.destroy(new Error('Request timed out after 30s'));
+    });
+
+    if (requestBody) outbound.write(requestBody);
+    outbound.end();
+  });
+}
+
+function hasHeader(headers, name) {
+  const lower = name.toLowerCase();
+  return Object.keys(headers).some(key => key.toLowerCase() === lower);
+}
+
+function parseResponseBody(rawBody, contentType) {
+  if (!rawBody) return null;
+  if (String(contentType).toLowerCase().includes('json')) {
+    try {
+      return JSON.parse(rawBody);
+    } catch {
+      return rawBody;
+    }
+  }
+  return rawBody;
 }
 
 function buildHTML(docsPath) {
@@ -127,6 +268,9 @@ ${getCSS()}
         <div class="detail-header">
           <span class="method-badge" id="detail-method"></span>
           <span class="detail-path" id="detail-path"></span>
+          <button class="icon-btn danger" id="delete-endpoint-btn" type="button" title="Delete endpoint">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M6 4V2.8C6 2.36 6.36 2 6.8 2h2.4c.44 0 .8.36.8.8V4m2.5 0-.5 9.2c-.02.45-.38.8-.83.8H4.83c-.45 0-.81-.35-.83-.8L3.5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M7 7v4M9 7v4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          </button>
         </div>
         <div class="detail-meta">
           <span class="meta-item" id="detail-hits"></span>
@@ -153,6 +297,21 @@ ${getCSS()}
         <div class="section" id="query-params-section" style="display:none">
           <h3 class="section-title">Query Parameters</h3>
           <div id="query-params"></div>
+        </div>
+
+        <div class="section">
+          <h3 class="section-title">Try Request</h3>
+          <div class="try-panel">
+            <div class="try-row">
+              <select id="try-method" class="try-method">
+                <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+              </select>
+              <input id="try-path" class="try-path" type="text" spellcheck="false">
+              <button id="try-run-btn" class="run-btn" type="button">Run</button>
+            </div>
+            <textarea id="try-body" class="try-body" spellcheck="false" placeholder="JSON request body"></textarea>
+            <div class="try-result" id="try-result" style="display:none"></div>
+          </div>
         </div>
       </div>
     </main>
@@ -244,7 +403,10 @@ body{font-family:var(--font-sans);background:var(--bg-primary);color:var(--text-
 /* Detail View */
 .detail-header{display:flex;align-items:center;gap:14px;margin-bottom:16px}
 .detail-header .method-badge{font-size:.85rem;font-weight:700;padding:6px 14px;border-radius:var(--radius-sm)}
-.detail-path{font-size:1.3rem;font-weight:600;font-family:var(--font-mono)}
+.detail-path{font-size:1.3rem;font-weight:600;font-family:var(--font-mono);min-width:0;overflow-wrap:anywhere}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-secondary);cursor:pointer;transition:all .15s ease;flex-shrink:0}
+.icon-btn:hover{color:var(--text-primary);border-color:var(--border-hover);background:var(--bg-hover)}
+.icon-btn.danger:hover{color:var(--delete);border-color:rgba(248,113,113,.45);background:var(--delete-bg)}
 .detail-meta{display:flex;gap:20px;margin-bottom:20px}
 .meta-item{font-size:.8rem;color:var(--text-secondary);display:flex;align-items:center;gap:4px}
 .detail-status-codes{display:flex;gap:8px;margin-bottom:28px;flex-wrap:wrap}
@@ -282,11 +444,29 @@ body{font-family:var(--font-sans);background:var(--bg-primary);color:var(--text-
 .param-table th{color:var(--text-muted);font-weight:600;font-size:.7rem;text-transform:uppercase;letter-spacing:.5px}
 .param-table td{color:var(--text-secondary);font-family:var(--font-mono)}
 
+/* Try Request */
+.try-panel{border:1px solid var(--border);background:var(--bg-secondary);border-radius:var(--radius);padding:12px}
+.try-row{display:grid;grid-template-columns:110px minmax(0,1fr) 88px;gap:8px;margin-bottom:10px}
+.try-method,.try-path,.try-body{background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-family:var(--font-sans);outline:none}
+.try-method{padding:0 10px;font-weight:700}
+.try-path{padding:10px 12px;font-family:var(--font-mono);font-size:.82rem}
+.try-body{width:100%;min-height:128px;resize:vertical;padding:12px;font-family:var(--font-mono);font-size:.78rem;line-height:1.6;margin-bottom:10px}
+.try-method:focus,.try-path:focus,.try-body:focus{border-color:var(--accent)}
+.run-btn{border:1px solid var(--accent);border-radius:var(--radius-sm);background:var(--accent);color:#fff;font-weight:700;cursor:pointer;transition:all .15s ease}
+.run-btn:hover{background:var(--accent-hover)}
+.run-btn:disabled{opacity:.55;cursor:wait}
+.try-result{border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden}
+.try-result-head{display:flex;gap:10px;align-items:center;padding:10px 12px;background:var(--bg-tertiary);border-bottom:1px solid var(--border);font-size:.8rem;color:var(--text-secondary)}
+.try-result-head strong{color:var(--text-primary);font-family:var(--font-mono)}
+.try-error{color:var(--delete);padding:12px;font-size:.82rem}
+
 /* Responsive */
 @media(max-width:768px){
   .sidebar{width:100%;min-width:auto;max-height:40vh;border-right:none;border-bottom:1px solid var(--border)}
   .main-layout{flex-direction:column}
   .topbar-stats{display:none}
+  .try-row{grid-template-columns:1fr}
+  .run-btn{height:38px}
 }
 `;
 }
@@ -296,6 +476,8 @@ function getJS(docsPath) {
 (function(){
   const API_URL = '${docsPath}/api.json';
   const SSE_URL = '${docsPath}/stream';
+  const ENDPOINT_URL = '${docsPath}/endpoint';
+  const TRY_URL = '${docsPath}/try';
 
   let endpoints = [];
   let selectedKey = null;
@@ -307,6 +489,8 @@ function getJS(docsPath) {
   document.getElementById('search-input').addEventListener('input', (e) => {
     renderSidebar(endpoints, e.target.value.toLowerCase());
   });
+  document.getElementById('delete-endpoint-btn').addEventListener('click', deleteSelectedEndpoint);
+  document.getElementById('try-run-btn').addEventListener('click', runSelectedEndpoint);
 
   // --- Fetch all docs ---
   async function fetchDocs() {
@@ -319,6 +503,11 @@ function getJS(docsPath) {
       if (selectedKey) {
         const ep = endpoints.find(e => e.method + ' ' + e.path === selectedKey);
         if (ep) renderDetail(ep);
+        if (!ep) {
+          selectedKey = null;
+          document.getElementById('endpoint-detail').style.display = 'none';
+          document.getElementById('welcome').style.display = 'flex';
+        }
       }
     } catch(e) { console.error('[docify] fetch error', e); }
   }
@@ -329,7 +518,7 @@ function getJS(docsPath) {
     es.onmessage = (evt) => {
       try {
         const msg = JSON.parse(evt.data);
-        if (msg.type === 'update' || msg.type === 'clear') fetchDocs();
+        if (msg.type === 'update' || msg.type === 'clear' || msg.type === 'delete') fetchDocs();
       } catch(e) {}
     };
     es.onerror = () => {
@@ -446,6 +635,113 @@ function getJS(docsPath) {
     } else {
       qpSection.style.display = 'none';
     }
+
+    setupTryPanel(ep);
+  }
+
+  async function deleteSelectedEndpoint() {
+    if (!selectedKey) return;
+    const ep = endpoints.find(e => e.method + ' ' + e.path === selectedKey);
+    if (!ep) return;
+    const ok = confirm('Delete ' + ep.method + ' ' + ep.path + ' from Docify?');
+    if (!ok) return;
+
+    try {
+      const res = await fetch(ENDPOINT_URL, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ method: ep.method, path: ep.path })
+      });
+      if (!res.ok) throw new Error('Delete failed');
+      selectedKey = null;
+      await fetchDocs();
+    } catch (e) {
+      alert(e.message || 'Could not delete endpoint');
+    }
+  }
+
+  function setupTryPanel(ep) {
+    const methodEl = document.getElementById('try-method');
+    const pathEl = document.getElementById('try-path');
+    const bodyEl = document.getElementById('try-body');
+    const resultEl = document.getElementById('try-result');
+    const latestRequest = ep.requestExamples && ep.requestExamples.length
+      ? ep.requestExamples[ep.requestExamples.length - 1]
+      : null;
+    const query = latestRequest && latestRequest.query && Object.keys(latestRequest.query).length
+      ? '?' + new URLSearchParams(latestRequest.query).toString()
+      : '';
+
+    methodEl.value = ep.method;
+    pathEl.value = ep.path + query;
+    bodyEl.value = latestRequest && latestRequest.body ? JSON.stringify(latestRequest.body, null, 2) : '';
+    bodyEl.style.display = ['GET', 'HEAD'].includes(ep.method) ? 'none' : 'block';
+    resultEl.style.display = 'none';
+    resultEl.innerHTML = '';
+
+    methodEl.onchange = () => {
+      bodyEl.style.display = ['GET', 'HEAD'].includes(methodEl.value) ? 'none' : 'block';
+    };
+  }
+
+  async function runSelectedEndpoint() {
+    const method = document.getElementById('try-method').value;
+    const path = document.getElementById('try-path').value.trim();
+    const bodyText = document.getElementById('try-body').value.trim();
+    const resultEl = document.getElementById('try-result');
+    const btn = document.getElementById('try-run-btn');
+    let body;
+
+    if (!path.startsWith('/')) {
+      renderTryError('Path must start with /');
+      return;
+    }
+
+    if (!['GET', 'HEAD'].includes(method) && bodyText) {
+      try {
+        body = JSON.parse(bodyText);
+      } catch (e) {
+        renderTryError('Request body must be valid JSON');
+        return;
+      }
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Running';
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="try-result-head">Sending request...</div>';
+
+    try {
+      const res = await fetch(TRY_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ method, path, body })
+      });
+      const data = await res.json();
+      renderTryResult(data);
+      setTimeout(fetchDocs, 200);
+    } catch (e) {
+      renderTryError(e.message || 'Request failed');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Run';
+    }
+  }
+
+  function renderTryResult(data) {
+    const resultEl = document.getElementById('try-result');
+    const status = data.statusCode || 'ERR';
+    const duration = data.durationMs !== undefined ? data.durationMs + 'ms' : '';
+    const json = JSON.stringify(data.body !== undefined ? data.body : data, null, 2);
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="try-result-head"><strong>' + escHtml(String(status)) + '</strong><span>' + escHtml(duration) + '</span></div>'
+      + '<div class="code-block-wrapper"><button class="copy-btn" onclick="copyCode(this)">Copy</button><pre class="code-block">' + highlightJSON(json) + '</pre></div>';
+  }
+
+  function renderTryError(message) {
+    const resultEl = document.getElementById('try-result');
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="try-error">' + escHtml(message) + '</div>';
   }
 
   function renderExamples(prefix, examples, transform) {

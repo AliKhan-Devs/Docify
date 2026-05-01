@@ -1,6 +1,8 @@
 'use strict';
 
 const { EventEmitter } = require('events');
+const fs = require('fs');
+const path = require('path');
 const logger = require('./logger');
 
 /**
@@ -23,12 +25,20 @@ class RouteRegistry extends EventEmitter {
   /**
    * @param {Object} options
    * @param {number} [options.maxExamples=5] - Max examples stored per endpoint
+   * @param {boolean} [options.persist=false] - Persist captured endpoints to disk
+   * @param {string} [options.storagePath] - JSON file used for persistence
    */
   constructor(options = {}) {
     super();
     this.maxExamples = options.maxExamples || 5;
+    this.persist = options.persist === true;
+    this.storagePath = options.storagePath || path.join(process.cwd(), '.docify', 'docify.json');
     /** @type {Map<string, EndpointRecord>} */
     this.endpoints = new Map();
+
+    if (this.persist) {
+      this._loadFromDisk();
+    }
   }
 
   /**
@@ -153,6 +163,7 @@ class RouteRegistry extends EventEmitter {
     }
 
     logger.info(`Registered: ${key} (${record.hitCount} hits)`);
+    this._saveToDisk();
     this.emit('update', { key, record: this._serializeRecord(record) });
   }
 
@@ -182,11 +193,32 @@ class RouteRegistry extends EventEmitter {
   }
 
   /**
+   * Delete a specific endpoint.
+   * @param {string} method
+   * @param {string} path
+   * @returns {boolean} true when an endpoint was removed
+   */
+  delete(method, path) {
+    const normalizedPath = this.normalizePath(path);
+    const key = `${method.toUpperCase()} ${normalizedPath}`;
+    const removed = this.endpoints.delete(key);
+
+    if (removed) {
+      logger.info(`Deleted endpoint: ${key}`);
+      this._saveToDisk();
+      this.emit('delete', { key });
+    }
+
+    return removed;
+  }
+
+  /**
    * Clear all stored data.
    */
   clear() {
     this.endpoints.clear();
     logger.info('Registry cleared');
+    this._saveToDisk();
     this.emit('clear');
   }
 
@@ -223,6 +255,66 @@ class RouteRegistry extends EventEmitter {
       requestContentTypes: [...record.requestContentTypes],
       responseContentTypes: [...record.responseContentTypes],
     };
+  }
+
+  /**
+   * Load persisted endpoint data from disk.
+   * @private
+   */
+  _loadFromDisk() {
+    try {
+      if (!fs.existsSync(this.storagePath)) return;
+
+      const raw = fs.readFileSync(this.storagePath, 'utf8');
+      if (!raw.trim()) return;
+
+      const parsed = JSON.parse(raw);
+      const endpoints = Array.isArray(parsed.endpoints) ? parsed.endpoints : [];
+
+      for (const endpoint of endpoints) {
+        if (!endpoint || !endpoint.method || !endpoint.path) continue;
+        const method = endpoint.method.toUpperCase();
+        const normalizedPath = this.normalizePath(endpoint.path);
+        const key = `${method} ${normalizedPath}`;
+
+        this.endpoints.set(key, {
+          method,
+          path: normalizedPath,
+          requestExamples: Array.isArray(endpoint.requestExamples) ? endpoint.requestExamples.slice(-this.maxExamples) : [],
+          responseExamples: Array.isArray(endpoint.responseExamples) ? endpoint.responseExamples.slice(-this.maxExamples) : [],
+          statusCodes: new Set(Array.isArray(endpoint.statusCodes) ? endpoint.statusCodes : []),
+          queryParams: new Set(Array.isArray(endpoint.queryParams) ? endpoint.queryParams : []),
+          headerKeys: new Set(Array.isArray(endpoint.headerKeys) ? endpoint.headerKeys : []),
+          lastUsed: endpoint.lastUsed || null,
+          hitCount: Number.isFinite(endpoint.hitCount) ? endpoint.hitCount : 0,
+          requestContentTypes: new Set(Array.isArray(endpoint.requestContentTypes) ? endpoint.requestContentTypes : []),
+          responseContentTypes: new Set(Array.isArray(endpoint.responseContentTypes) ? endpoint.responseContentTypes : []),
+        });
+      }
+
+      logger.info(`Loaded ${this.endpoints.size} persisted endpoints from ${this.storagePath}`);
+    } catch (err) {
+      logger.error(`Failed to load persisted Docify data: ${err.message}`);
+    }
+  }
+
+  /**
+   * Persist endpoint data to disk.
+   * @private
+   */
+  _saveToDisk() {
+    if (!this.persist) return;
+
+    try {
+      fs.mkdirSync(path.dirname(this.storagePath), { recursive: true });
+      fs.writeFileSync(this.storagePath, JSON.stringify({
+        version: 1,
+        savedAt: new Date().toISOString(),
+        endpoints: this.getAll(),
+      }, null, 2));
+    } catch (err) {
+      logger.error(`Failed to persist Docify data: ${err.message}`);
+    }
   }
 }
 
