@@ -1,6 +1,7 @@
 test/
 example/
 coverage/
+images/
 .gitignore
 .env
 *.log
