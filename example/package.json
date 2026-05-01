@@ -1,0 +1,13 @@
+{
+  "name": "docify-example",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Example Express app demonstrating Docify",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
