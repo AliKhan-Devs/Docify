@@ -26,7 +26,7 @@ npm install docify
 
 ```js
 const express = require('express');
-const docify = require('docify');
+const docify = require('@alikhan-devs/docify');
 
 const app = express();
 app.use(express.json());
