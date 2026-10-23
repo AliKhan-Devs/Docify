@@ -21,7 +21,7 @@
 <!-- dashboard image -->
 ![Dashboard Image of Docify](./images/dashboard.png)
 
-## ⚡ Quick Start
+## Quick Start
 
 ```bash
 npm install docify
@@ -45,7 +45,7 @@ app.listen(3000);
 // Visit http://localhost:3000/docs to see your auto-generated API docs!
 ```
 
-## 🎯 How It Works
+## How It Works
 
 1. **You install Docify** and add it as Express middleware
 2. **You develop normally** — no annotations, no schemas, no changes to your code
@@ -53,7 +53,7 @@ app.listen(3000);
 4. **Documentation is generated** automatically and served at `/docs`
 5. **Live updates** — as you make more API calls, docs update in real-time via SSE
 
-## 📋 Configuration
+## Configuration
 
 ```js
 app.use(docify({
@@ -76,7 +76,7 @@ app.use(docify({
 | `DOCIFY_ENABLED=false` | Disable Docify entirely (useful for production) |
 | `DOCIFY_DEBUG=true` | Enable internal debug logging |
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 Express Request → Capture Middleware → Sanitizer → Route Registry → Doc Generator → UI
@@ -106,7 +106,7 @@ Docify automatically detects dynamic URL segments:
 - `/users/550e8400-e29b-41d4-a716-446655440000` → `/users/:id`
 - `/users/507f1f77bcf86cd799439011` → `/users/:id`
 
-## 🔒 Security
+## Security
 
 - **Sensitive fields are masked by default** — passwords, tokens, API keys, secrets are replaced with `[REDACTED]`
 - **No external network calls** — all data stays in-process memory
@@ -118,7 +118,7 @@ Docify automatically detects dynamic URL segments:
 
 `password`, `token`, `access_token`, `refresh_token`, `api_key`, `secret`, `authorization`, `cookie`, `session`, `credit_card`, `card_number`, `cvv`, `ssn`, `private_key`, `x-api-key`
 
-## 📡 API Endpoints
+## API Endpoints
 
 When Docify is mounted, these routes are available:
 
@@ -131,7 +131,7 @@ When Docify is mounted, these routes are available:
 | `DELETE /docs/endpoint` | Delete one captured endpoint by `method` and `path` |
 | `POST /docs/try` | Run an endpoint against the live backend from the docs UI |
 
-## 🧪 Running the Example
+## Running the Example
 
 ```bash
 cd example
@@ -150,6 +150,6 @@ curl -X POST http://localhost:3000/api/auth/login -H "Content-Type: application/
 
 Visit `http://localhost:3000/docs` to see the auto-generated documentation!
 
-## 📄 License
+## License
 
 MIT
