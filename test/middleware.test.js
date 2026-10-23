@@ -108,6 +108,13 @@ describe('Capture Middleware (integration)', () => {
     expect(ep).toBeUndefined();
   });
 
+  it('should reject protocol-relative external URLs in the try route', async () => {
+    await request(app)
+      .post('/docs/try')
+      .send({ method: 'GET', path: '//example.com/' })
+      .expect(400);
+  });
+
   it('should run an endpoint through the docs try route', async () => {
     const res = await request(app)
       .post('/docs/try')

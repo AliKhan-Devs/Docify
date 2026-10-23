@@ -143,7 +143,16 @@ function runRequestFromDocs(req, payload) {
 
   const protocol = req.protocol === 'https' ? 'https:' : 'http:';
   const baseUrl = `${protocol}//${req.get('host')}`;
-  const url = new URL(targetPath, baseUrl);
+  const base = new URL(baseUrl);
+  const url = new URL(targetPath, base);
+
+  // The Try Request feature must only call back into the current origin.
+  // Paths such as //example.com would otherwise turn into external URLs.
+  if (url.origin !== base.origin) {
+    const err = new Error('path must resolve to the current origin');
+    err.statusCode = 400;
+    throw err;
+  }
   const bodyAllowed = !['GET', 'HEAD'].includes(method);
   const requestBody = bodyAllowed && body !== undefined && body !== null && body !== ''
     ? (typeof body === 'string' ? body : JSON.stringify(body))
