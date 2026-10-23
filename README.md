@@ -5,9 +5,9 @@
   <img src="https://img.shields.io/badge/dependencies-0-c084fc?style=for-the-badge&labelColor=0a0b0f" alt="deps" />
 </p>
 
-<h1 align="center">📄 Docify</h1>
+<h1 align="center">Docify</h1>
 
-<<p align="center">
+<p align="center">
   <strong>Turn any Express API into live documentation in 2 lines.</strong>
 </p>
 
